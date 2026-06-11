@@ -1,13 +1,10 @@
 import sqlite3
 import requests
 
-TMDB_API_KEY = "Enter your API key here"
-
+TMDB_API_KEY = "0027014ff7945860eb80ccb24f384ee4"
 TMDB_BASE = "https://api.themoviedb.org/3"
 DB_FILE = "watchlist.db"
-
 WATCH_STATUSES = ["Want to Watch", "Watching", "Completed", "Dropped"]
-MEDIA_TYPES = ["movie", "tv"]
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -23,7 +20,7 @@ def init_db():
             overview        TEXT,
             tmdb_rating     REAL,
             runtime         TEXT,
-            watch_status    TEXT DEFAULT 'Want to Watch',
+            watch_status    TEXT,
             my_rating       INTEGER,
             notes           TEXT,
             UNIQUE(tmdb_id, media_type)
@@ -32,14 +29,14 @@ def init_db():
     conn.commit()
     conn.close()
 
-def search_tmdb(query, media_type="movie"):
+def search_tmdb(query, media_type):
     endpoint = f"{TMDB_BASE}/search/{media_type}"
     params = {"api_key": TMDB_API_KEY, "query": query, "language": "en-US", "page": 1}
     try:
         response = requests.get(endpoint, params=params, timeout=10)
         response.raise_for_status()
         results = response.json().get("results", [])
-        return results[:5]  # Return top 5 matches
+        return results[:5]
     except requests.exceptions.ConnectionError:
         print("ERROR: No internet connection.")
         return []
@@ -53,8 +50,7 @@ def search_tmdb(query, media_type="movie"):
         print(f"ERROR: {e}")
         return []
 
-def fetch_details(tmdb_id, media_type="movie"):
-    """Fetch full details for a specific movie or TV show."""
+def fetch_details(tmdb_id, media_type):
     endpoint = f"{TMDB_BASE}/{media_type}/{tmdb_id}"
     params = {"api_key": TMDB_API_KEY, "language": "en-US"}
     try:
@@ -66,23 +62,12 @@ def fetch_details(tmdb_id, media_type="movie"):
         return None
 
 def parse_details(data, media_type):
-    """Extract the fields we care about from TMDB's response."""
     title = data.get("title") or data.get("name", "Unknown")
-
-    # Release year
     date = data.get("release_date") or data.get("first_air_date", "")
     release_year = date[:4] if date else "?"
-
-    # Genres
     genres = ", ".join(g["name"] for g in data.get("genres", []))
-
-    # Overview
     overview = data.get("overview", "No overview available.")
-
-    # TMDB rating
     tmdb_rating = data.get("vote_average")
-
-    # Runtime
     if media_type == "movie":
         mins = data.get("runtime")
         runtime = f"{mins} min" if mins else "?"
@@ -90,7 +75,6 @@ def parse_details(data, media_type):
         seasons = data.get("number_of_seasons")
         episodes = data.get("number_of_episodes")
         runtime = f"{seasons} season(s), {episodes} ep(s)" if seasons else "?"
-
     return {
         "tmdb_id": data["id"],
         "media_type": media_type,
@@ -149,13 +133,14 @@ def display_watchlist(filter_status=None, filter_genre=None, filter_type=None):
         print("Nothing found.")
         return
 
-    print(f"\n{'ID':<5} {'Title':<35} {'Type':<6} {'Year':<6} {'Genre':<25} {'Runtime':<20} {'TMDB':>5} {'Status':<16} {'Mine':>5}")
-    print("-" * 130)
+    print(f"\n{'ID':<5} {'Title':<35} {'Type':<6} {'Year':<6} {'Genre':<27} {'Runtime':<20} {'TMDB':>5} {'Status':<16} {'Mine':>5}")
+    print("-" * 133)
     for row in rows:
         id_, title, mtype, year, genres, runtime, tmdb_r, status, my_r = row
         tmdb_str = f"{tmdb_r:.1f}" if tmdb_r else "-"
         my_str = str(my_r) if my_r else "-"
-        print(f"{id_:<5} {title[:33]:<35} {mtype:<6} {year:<6} {(genres or '')[:23]:<25} {(runtime or '?')[:18]:<20} {tmdb_str:>5} {status:<16} {my_str:>5}")
+        mtype = "TV" if mtype == "tv" else "Movie"
+        print(f"{id_:<5} {title[:33]:<35} {mtype:<6} {year:<6} {(genres or '')[:25]:<27} {(runtime or '?')[:18]:<20} {tmdb_str:>5} {status:<16} {my_str:>5}")
 
 def view_details(entry_id):
     conn = sqlite3.connect(DB_FILE)
@@ -200,7 +185,7 @@ def update_entry(entry_id, field, new_value):
 def delete_entry(entry_id):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM watchlist WHERE id = ?", (entry_id,))
+    cursor.execute("DELETE FROM watchlist WHERE id = ?", (entry_id))
     if cursor.rowcount == 0:
         print("ID not found.")
     else:
@@ -272,7 +257,10 @@ while True:
                         break
                 except ValueError:
                     pass
-            media_type = "movie" if type_choice == 1 else "tv"
+            if type_choice == 1:
+                media_type = "movie"
+            else:
+                media_type = "tv"
             query = input("Enter title to search: ").strip()
             results = search_tmdb(query, media_type)
 
@@ -288,7 +276,7 @@ while True:
                 rating = r.get("vote_average", "?")
                 print(f"  {i+1}. {title} ({year}) — TMDB: {rating}")
 
-            print(f"  0. Cancel")
+            print(f"0. Cancel")
             while True:
                 try:
                     pick = int(input("Pick a result: "))
@@ -341,7 +329,7 @@ while True:
             field_choice = int(input("Choose (1-3): "))
             if field_choice == 1:
                 for i, s in enumerate(WATCH_STATUSES):
-                    print(f"  {i+1}. {s}")
+                    print(f"{i+1}. {s}")
                 while True:
                     try:
                         pick = int(input("Pick (1-4): ")) - 1
