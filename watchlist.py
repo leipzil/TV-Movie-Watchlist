@@ -1,7 +1,7 @@
 import sqlite3
 import requests
 
-TMDB_API_KEY = "0027014ff7945860eb80ccb24f384ee4"
+TMDB_API_KEY = "Enter your API key here."
 TMDB_BASE = "https://api.themoviedb.org/3"
 DB_FILE = "watchlist.db"
 WATCH_STATUSES = ["Want to Watch", "Watching", "Completed", "Dropped"]
