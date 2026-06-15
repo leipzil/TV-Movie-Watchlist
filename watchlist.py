@@ -1,7 +1,7 @@
 import sqlite3
 import requests
 
-TMDB_API_KEY = "Your API key here"
+TMDB_API_KEY = "0027014ff7945860eb80ccb24f384ee4"
 TMDB_BASE = "https://api.themoviedb.org/3"
 DB_FILE = "watchlist.db"
 
@@ -55,9 +55,8 @@ def fetch_details(tmdb_id, media_type):
     params = {"api_key": TMDB_API_KEY, "language": "en-US"}
     r = requests.get(endpoint, params=params, timeout=10)
     r.raise_for_status()
-    return r.json()
+    data = r.json()
 
-def parse_details(data, media_type):
     title = data.get("title") or data.get("name", "Unknown")
     date = data.get("release_date") or data.get("first_air_date", "")
     release_year = date[:4] if date else "?"
@@ -95,8 +94,8 @@ def display_results(results):
         year = date[:4] if date else "?"
         rating = r.get("vote_average", "?")
         media = r.get("media_type", "")
-        tag = f" [{media.upper()}]" if media else ""
-        print(f"  {i+1}. {title} ({year}){tag} — {rating}")
+        tag = f"[{media.upper()}]" if media else ""
+        print(f"{i+1}. {title} ({year}){tag} - {rating}")
 
 def add_to_watchlist(details, watch_status, my_rating=None, notes=None):
     conn = sqlite3.connect(DB_FILE)
@@ -106,8 +105,10 @@ def add_to_watchlist(details, watch_status, my_rating=None, notes=None):
             INSERT INTO watchlist
                 (tmdb_id, media_type, title, release_year, genres, overview, tmdb_rating, runtime, watch_status, my_rating, notes)
             VALUES
-                (:tmdb_id, :media_type, :title, :release_year, :genres, :overview, :tmdb_rating, :runtime, :watch_status, :my_rating, :notes)
-        """, {**details, "watch_status": watch_status, "my_rating": my_rating, "notes": notes})
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (details["tmdb_id"], details["media_type"], details["title"], details["release_year"],
+              details["genres"], details["overview"], details["tmdb_rating"], details["runtime"],
+              watch_status, my_rating, notes))
         conn.commit()
         print(f"Added \"{details['title']}\".")
     except sqlite3.IntegrityError:
@@ -163,11 +164,10 @@ def view_details(entry_id):
     if not row:
         print("Not found.")
         return
-    cols = ["id", "tmdb_id", "media_type", "title", "release_year", "genres",
-            "overview", "tmdb_rating", "runtime", "watch_status", "my_rating", "notes"]
+    cols = ["id", "tmdb_id", "media_type", "title", "release_year", "genres", "overview", "tmdb_rating", "runtime", "watch_status", "my_rating", "notes"]
     d = dict(zip(cols, row))
     print(f"""
-{d['title']} ({d['release_year']}) — {d['media_type']}
+{d['title']} ({d['release_year']}) - {d['media_type']}
 Genres  : {d['genres']}
 Runtime : {d['runtime']}
 TMDB    : {d['tmdb_rating']}
@@ -268,11 +268,10 @@ while True:
                 continue
 
             chosen = results[pick - 1]
-            data = fetch_details(chosen["id"], media_type)
-            if not data:
+            details = fetch_details(chosen["id"], media_type)
+            if not details:
                 continue
 
-            details = parse_details(data, media_type)
             print(f"\n{details['title']} ({details['release_year']}) | {details['genres']} | {details['runtime']} | TMDB: {details['tmdb_rating']}")
             print(details['overview'][:200])
 
