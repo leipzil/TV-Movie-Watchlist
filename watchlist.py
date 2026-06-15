@@ -1,9 +1,11 @@
 import sqlite3
 import requests
 
-TMDB_API_KEY = "Enter your API key here."
+TMDB_API_KEY = "Enter your API key here"
+
 TMDB_BASE = "https://api.themoviedb.org/3"
 DB_FILE = "watchlist.db"
+
 WATCH_STATUSES = ["Want to Watch", "Watching", "Completed", "Dropped"]
 
 def init_db():
@@ -50,7 +52,7 @@ def search_tmdb(query, media_type):
         print(f"ERROR: {e}")
         return []
 
-def fetch_details(tmdb_id, media_type):
+def fetch_details(tmdb_id, media_type="movie"):
     endpoint = f"{TMDB_BASE}/{media_type}/{tmdb_id}"
     params = {"api_key": TMDB_API_KEY, "language": "en-US"}
     try:
@@ -68,6 +70,7 @@ def parse_details(data, media_type):
     genres = ", ".join(g["name"] for g in data.get("genres", []))
     overview = data.get("overview", "No overview available.")
     tmdb_rating = data.get("vote_average")
+
     if media_type == "movie":
         mins = data.get("runtime")
         runtime = f"{mins} min" if mins else "?"
@@ -75,6 +78,7 @@ def parse_details(data, media_type):
         seasons = data.get("number_of_seasons")
         episodes = data.get("number_of_episodes")
         runtime = f"{seasons} season(s), {episodes} ep(s)" if seasons else "?"
+
     return {
         "tmdb_id": data["id"],
         "media_type": media_type,
@@ -85,6 +89,20 @@ def parse_details(data, media_type):
         "tmdb_rating": tmdb_rating,
         "runtime": runtime,
     }
+
+def display_results(results):
+    if not results:
+        print("No results found.")
+        return
+    print("\nResults:")
+    for i, r in enumerate(results):
+        title = r.get("title") or r.get("name", "?")
+        date = r.get("release_date") or r.get("first_air_date", "")
+        year = date[:4] if date else "?"
+        rating = r.get("vote_average", "?")
+        media = r.get("media_type", "")
+        media_str = f" [{media.upper()}]" if media else ""
+        print(f"  {i+1}. {title} ({year}){media_str} — TMDB: {rating}")
 
 def add_to_watchlist(details, watch_status, my_rating=None, notes=None):
     conn = sqlite3.connect(DB_FILE)
@@ -167,6 +185,23 @@ My Rating   : {data['my_rating'] or 'Not rated'}
 Notes       : {data['notes'] or 'None'}
 """)
 
+def trending(media_type, time_window):
+    endpoint = f"{TMDB_BASE}/trending/{media_type}/{time_window}"
+    params = {"api_key": TMDB_API_KEY, "language": "en-US", "page": 1}
+    try:
+        response = requests.get(endpoint, params=params, timeout=10)
+        response.raise_for_status()
+        return response.json().get("results", [])[:5]
+    except requests.exceptions.ConnectionError:
+        print("ERROR: No internet connection.")
+        return []
+    except requests.exceptions.HTTPError as e:
+        print(f"ERROR: TMDB returned status {response.status_code}.")
+        return []
+    except requests.exceptions.RequestException as e:
+        print(f"ERROR: {e}")
+        return []
+
 def update_entry(entry_id, field, new_value):
     allowed = ("watch_status", "my_rating", "notes")
     if field not in allowed:
@@ -185,48 +220,13 @@ def update_entry(entry_id, field, new_value):
 def delete_entry(entry_id):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM watchlist WHERE id = ?", (entry_id))
+    cursor.execute("DELETE FROM watchlist WHERE id = ?", (entry_id,))
     if cursor.rowcount == 0:
         print("ID not found.")
     else:
         conn.commit()
         print("Removed from watchlist.")
     conn.close()
-
-def show_stats():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT COUNT(*) FROM watchlist")
-    total = cursor.fetchone()[0]
-
-    cursor.execute("SELECT watch_status, COUNT(*) FROM watchlist GROUP BY watch_status")
-    by_status = cursor.fetchall()
-
-    cursor.execute("SELECT media_type, COUNT(*) FROM watchlist GROUP BY media_type")
-    by_type = cursor.fetchall()
-
-    cursor.execute("SELECT AVG(my_rating) FROM watchlist WHERE my_rating IS NOT NULL")
-    avg_rating = cursor.fetchone()[0]
-
-    cursor.execute("SELECT title, my_rating FROM watchlist WHERE my_rating IS NOT NULL ORDER BY my_rating DESC LIMIT 3")
-    top_rated = cursor.fetchall()
-
-    conn.close()
-
-    print(f"\nTotal titles tracked: {total}")
-    print("\nBy status:")
-    for status, count in by_status:
-        print(f"  {status}: {count}")
-    print("\nBy type:")
-    for mtype, count in by_type:
-        print(f"  {mtype}: {count}")
-    if avg_rating:
-        print(f"\nYour average rating: {avg_rating:.1f}/10")
-    if top_rated:
-        print("\nYour top rated:")
-        for title, rating in top_rated:
-            print(f"  {rating}/10 — {title}")
 
 init_db()
 
@@ -238,15 +238,43 @@ while True:
 3. View full details of an entry
 4. Update status / rating / notes
 5. Remove a title
-6. Filter by status
-7. Filter by genre
-8. Filter by type (movie / tv)
-9. Stats
+6. View trending
 0. Exit""")
         menu = int(input("Choose: "))
 
         if menu == 1:
-            display_watchlist()
+            print("""
+1. All
+2. Filter by status
+3. Filter by genre
+4. Filter by type (movie / tv)""")
+            filter_choice = int(input("Choose: "))
+            if filter_choice == 1:
+                display_watchlist()
+            elif filter_choice == 2:
+                for i, s in enumerate(WATCH_STATUSES):
+                    print(f"  {i+1}. {s}")
+                while True:
+                    try:
+                        pick = int(input("Pick (1-4): ")) - 1
+                        if 0 <= pick <= 3:
+                            break
+                    except ValueError:
+                        pass
+                display_watchlist(filter_status=WATCH_STATUSES[pick])
+            elif filter_choice == 3:
+                genre = input("Enter genre to filter by (e.g. Action, Drama): ").strip()
+                display_watchlist(filter_genre=genre)
+            elif filter_choice == 4:
+                print("\n1. Movies only\n2. TV only")
+                while True:
+                    try:
+                        pick = int(input("Choose (1-2): "))
+                        if pick in (1, 2):
+                            break
+                    except ValueError:
+                        pass
+                display_watchlist(filter_type="movie" if pick == 1 else "tv")
 
         elif menu == 2:
             print("Search for: 1. Movie  2. TV Show")
@@ -257,26 +285,15 @@ while True:
                         break
                 except ValueError:
                     pass
-            if type_choice == 1:
-                media_type = "movie"
-            else:
-                media_type = "tv"
+            media_type = "movie" if type_choice == 1 else "tv"
             query = input("Enter title to search: ").strip()
             results = search_tmdb(query, media_type)
 
+            display_results(results)
             if not results:
-                print("No results found.")
                 continue
 
-            print("\nResults:")
-            for i, r in enumerate(results):
-                title = r.get("title") or r.get("name", "?")
-                date = r.get("release_date") or r.get("first_air_date", "")
-                year = date[:4] if date else "?"
-                rating = r.get("vote_average", "?")
-                print(f"  {i+1}. {title} ({year}) — TMDB: {rating}")
-
-            print(f"0. Cancel")
+            print("  0. Cancel")
             while True:
                 try:
                     pick = int(input("Pick a result: "))
@@ -329,7 +346,7 @@ while True:
             field_choice = int(input("Choose (1-3): "))
             if field_choice == 1:
                 for i, s in enumerate(WATCH_STATUSES):
-                    print(f"{i+1}. {s}")
+                    print(f"  {i+1}. {s}")
                 while True:
                     try:
                         pick = int(input("Pick (1-4): ")) - 1
@@ -352,34 +369,15 @@ while True:
                 delete_entry(entry_id)
 
         elif menu == 6:
-            for i, s in enumerate(WATCH_STATUSES):
-                print(f"  {i+1}. {s}")
-            while True:
-                try:
-                    pick = int(input("Pick (1-4): ")) - 1
-                    if 0 <= pick <= 3:
-                        break
-                except ValueError:
-                    pass
-            display_watchlist(filter_status=WATCH_STATUSES[pick])
+            print("\n1. Today\n2. This week")
+            time_window = "day" if int(input("Choose: ")) == 1 else "week"
 
-        elif menu == 7:
-            genre = input("Enter genre to filter by (e.g. Action, Drama): ").strip()
-            display_watchlist(filter_genre=genre)
+            print("\n1. All\n2. Movies\n3. TV")
+            media_map = {1: "all", 2: "movie", 3: "tv"}
+            media_type = media_map.get(int(input("Choose: ")), "all")
 
-        elif menu == 8:
-            print("1. Movies only  2. TV only")
-            while True:
-                try:
-                    pick = int(input("Choose (1-2): "))
-                    if pick in (1, 2):
-                        break
-                except ValueError:
-                    pass
-            display_watchlist(filter_type="movie" if pick == 1 else "tv")
-
-        elif menu == 9:
-            show_stats()
+            results = trending(media_type, time_window)
+            display_results(results)
 
         elif menu == 0:
             print("Goodbye!")
