@@ -333,7 +333,6 @@ while True:
             display_results(results)
 
         elif menu == 0:
-            print("bye")
             break
 
         else:
